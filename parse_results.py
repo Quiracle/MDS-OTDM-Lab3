@@ -119,7 +119,7 @@ def plot_2d_points(X2: np.ndarray, cluster: np.ndarray, title: str):
     plt.title(title)
     plt.xlabel("x1")
     plt.ylabel("x2")
-    plt.show()
+    plt.savefig(f"figs/{title}.png")
 
 def plot_wine_pca(X: np.ndarray, cluster: np.ndarray, title: str):
     """
