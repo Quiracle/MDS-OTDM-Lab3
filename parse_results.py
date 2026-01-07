@@ -110,24 +110,36 @@ def compact_cluster_ids(assign_median: Dict[int, int]) -> Tuple[Dict[int, int], 
 # -----------------------------
 # 2) Visualization helpers
 # -----------------------------
-def plot_2d_points(X2: np.ndarray, cluster: np.ndarray, title: str):
+def plot_2d_points(X2: np.ndarray, cluster: np.ndarray, title: str, median_indices: List[int] = None):
     """
     Simple 2D scatter colored by cluster labels.
+    Median/center points are highlighted with a different color.
     """
     plt.figure()
-    plt.scatter(X2[:, 0], X2[:, 1], c=cluster, s=50)
+    # Plot all points
+    plt.scatter(X2[:, 0], X2[:, 1], c=cluster, s=50, cmap='viridis')
+    
+    # Highlight center points with a different color
+    if median_indices is not None:
+        # Convert 1-indexed median indices to 0-indexed
+        center_idx = [m - 1 for m in median_indices]
+        plt.scatter(X2[center_idx, 0], X2[center_idx, 1], 
+                    c='red', s=150, marker='*', edgecolors='black', linewidths=1.5,
+                    label='Centers', zorder=5)
+        plt.legend()
+    
     plt.title(title)
     plt.xlabel("x1")
     plt.ylabel("x2")
     plt.savefig(f"figs/{title}.png")
 
-def plot_wine_pca(X: np.ndarray, cluster: np.ndarray, title: str):
+def plot_wine_pca(X: np.ndarray, cluster: np.ndarray, title: str, median_indices: List[int] = None):
     """
     PCA reduce Wine to 2D for visualization.
     """
     pca = PCA(n_components=2, random_state=42)
     X2 = pca.fit_transform(X)
-    plot_2d_points(X2, cluster, title + f" (PCA 2D, var={pca.explained_variance_ratio_.sum():.2f})")
+    plot_2d_points(X2, cluster, title + f" (PCA 2D, var={pca.explained_variance_ratio_.sum():.2f})", median_indices)
 
 
 # -----------------------------
@@ -160,18 +172,28 @@ def main():
             raise ValueError(f"Missing assignment for point i={i}. Did AMPL output include all rows?")
         cluster[i - 1] = point_cluster[i]
 
+    # Get median indices (these are 1-indexed from AMPL)
+    median_indices = list(median_to_cluster.keys())
+    
     # Print quick summary
     print("Medians used (median_j -> cluster_id):")
     for j, cid in sorted(median_to_cluster.items(), key=lambda t: t[1]):
         print(f"  {j} -> {cid}")
+    
+    # Print center coordinates
+    print("\nCenter coordinates:")
+    for j, cid in sorted(median_to_cluster.items(), key=lambda t: t[1]):
+        # Convert 1-indexed to 0-indexed for numpy array access
+        center_coords = X[j - 1]
+        print(f"  Cluster {cid} (point {j}): {center_coords}")
 
     # Visualize
     if args.dataset == "blobs":
         if X.shape[1] != 2:
             raise ValueError("Blobs expected to be 2D (n_features=2).")
-        plot_2d_points(X, cluster, "Blobs clustered by AMPL x[i,j]")
+        plot_2d_points(X, cluster, "Blobs clustered by AMPL x[i,j]", median_indices)
     else:
-        plot_wine_pca(X, cluster, "Wine clustered by AMPL x[i,j]")
+        plot_wine_pca(X, cluster, "Wine clustered by AMPL x[i,j]", median_indices)
 
 if __name__ == "__main__":
     main()
