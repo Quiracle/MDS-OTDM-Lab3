@@ -13,7 +13,6 @@ class Edge:
 
 
 class UnionFind:
-    """Disjoint-set union (Union-Find) with path compression + union by rank."""
     def __init__(self, n: int):
         self.parent = list(range(n))
         self.rank = [0] * n
@@ -37,17 +36,6 @@ class UnionFind:
 
 
 class KruskalMST:
-    """
-    Build a Minimum Spanning Tree (MST) from a symmetric distance matrix D,
-    interpreted as a complete undirected weighted graph.
-
-    Nodes are 0..n-1 (matrix indices). If you use 1..m in AMPL, convert as needed.
-
-    Notes:
-    - Requires D to be square and symmetric (within tolerance).
-    - Assumes nonnegative weights (typical for distances).
-    """
-
     def __init__(self, sym_tol: float = 1e-9, ignore_diagonal: bool = True):
         self.sym_tol = sym_tol
         self.ignore_diagonal = ignore_diagonal
@@ -64,10 +52,6 @@ class KruskalMST:
             raise ValueError(f"D must be symmetric. max|D-D.T|={max_asym:g} exceeds tol={self.sym_tol:g}.")
 
     def edges_from_distance_matrix(self, D: np.ndarray) -> List[Edge]:
-        """
-        Convert a symmetric distance matrix into a unique undirected edge list.
-        Only uses upper triangle (u < v).
-        """
         self._validate(D)
         n = D.shape[0]
         edges: List[Edge] = []
@@ -80,11 +64,7 @@ class KruskalMST:
 
         return edges
 
-    def build_mst(self, D: np.ndarray) -> Tuple[List[Edge], float]:
-        """
-        Run Kruskal's algorithm.
-        Returns (mst_edges, total_weight).
-        """
+    def build_mst(self, D: np.ndarray) -> Tuple[List[Edge], float]: # kruskal
         edges = self.edges_from_distance_matrix(D)
         edges.sort(key=lambda e: e.w)
 
@@ -101,16 +81,12 @@ class KruskalMST:
                     break
 
         if len(mst) != n - 1:
-            # For a complete graph this shouldn't happen unless n==0/1 or data invalid.
             raise RuntimeError(f"MST incomplete: got {len(mst)} edges for n={n} nodes.")
 
         return mst, total
 
 
 
-# -----------------------------
-# Example usage
-# -----------------------------
 if __name__ == "__main__":
     import load_datasets
 

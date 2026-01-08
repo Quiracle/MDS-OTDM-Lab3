@@ -1,195 +1,93 @@
-from __future__ import annotations
-
-import argparse
-from collections import deque
-from typing import List
-
+#!/usr/bin/env python3
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
-
+import argparse
 from load_datasets import get_blobs, get_wine, calculate_distances
 from mst import KruskalMST, Edge
-# -----------------------------
-# MST clustering
-# -----------------------------
-def mst_cut_clustering(mst_edges: List[Edge], n: int, k: int) -> np.ndarray:
-    """
-    Remove (k-1) largest edges from MST and return cluster labels in 1..k for each node.
-    """
-    if k < 1:
-        raise ValueError("k must be >= 1.")
-    if n == 0:
-        return np.array([], dtype=int)
-    if k > n:
-        raise ValueError(f"k must be <= n. Got k={k}, n={n}.")
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from collections import defaultdict, deque
 
-    if k == 1:
-        return np.ones(n, dtype=int)
 
-    # Sort MST edges by weight descending and "cut" the top (k-1)
-    mst_sorted = sorted(mst_edges, key=lambda e: e.w, reverse=True)
-    cut_edges = set((e.u, e.v) if e.u < e.v else (e.v, e.u) for e in mst_sorted[: k - 1])
+def cut_mst_and_get_labels(mst_edges, n, k):
+    edges_sorted = sorted(mst_edges, key=lambda e: e.w, reverse=True)
+    edges_kept = edges_sorted[k-1:]
 
-    # Build adjacency of remaining forest
-    adj = [[] for _ in range(n)]
-    for e in mst_edges:
-        uv = (e.u, e.v) if e.u < e.v else (e.v, e.u)
-        if uv in cut_edges:
-            continue
+    adj = defaultdict(list)
+    for e in edges_kept:
         adj[e.u].append(e.v)
         adj[e.v].append(e.u)
 
-    # Connected components -> clusters
-    labels = np.zeros(n, dtype=int)
+    labels = -np.ones(n, dtype=int)
     current_label = 0
 
-    for start in range(n):
-        if labels[start] != 0:
+    for i in range(n):
+        if labels[i] != -1:
             continue
-        current_label += 1
-        q = deque([start])
-        labels[start] = current_label
-        while q:
-            u = q.popleft()
+        queue = deque([i])
+        labels[i] = current_label
+        while queue:
+            u = queue.popleft()
             for v in adj[u]:
-                if labels[v] == 0:
+                if labels[v] == -1:
                     labels[v] = current_label
-                    q.append(v)
+                    queue.append(v)
+        current_label += 1
 
-    # In a tree cut into k parts, we should get exactly k components
-    # But due to edge ties / numeric quirks, we just normalize to 1..num_components
     return labels
 
 
-# -----------------------------
-# Plotting
-# -----------------------------
-def plot_2d_points(X2: np.ndarray, labels: np.ndarray, title: str, mst_edges: List[Edge], cut_edges_set: set) -> None:
-    plt.figure()
-    
-    # Plot edges
-    for e in mst_edges:
-        p1 = X2[e.u]
-        p2 = X2[e.v]
-        
-        # Check if this edge is cut
-        key = (e.u, e.v) if e.u < e.v else (e.v, e.u)
-        if key in cut_edges_set:
-            plt.plot([p1[0], p2[0]], [p1[1], p2[1]], c='red', linestyle='--', linewidth=1, alpha=0.8)
-        else:
-            plt.plot([p1[0], p2[0]], [p1[1], p2[1]], c='gray', linestyle='-', linewidth=0.5, alpha=0.5)
-
-    plt.scatter(X2[:, 0], X2[:, 1], c=labels, s=50, zorder=3)
-    plt.title(title)
-    plt.xlabel("x1")
-    plt.ylabel("x2")
-    plt.savefig(f"figs/{title}.png")
+def medoid_cost_from_labels(D: np.ndarray, labels: np.ndarray) -> float:
+    total = 0.0
+    for c in np.unique(labels):
+        idx = np.where(labels == c)[0]
+        subD = D[np.ix_(idx, idx)]
+        costs = subD.sum(axis=0)
+        medoid_local = np.argmin(costs)
+        medoid = idx[medoid_local]
+        total += D[idx, medoid].sum()
+    return float(total)
 
 
-def plot_dataset(X: np.ndarray, labels: np.ndarray, dataset_name: str, mst_edges: List[Edge], cut_edges: List[Edge]) -> None:
-    # Convert cut_edges to a set of tuples for faster lookup
-    cut_edges_set = set()
-    for e in cut_edges:
-        cut_edges_set.add((e.u, e.v) if e.u < e.v else (e.v, e.u))
-
-    if X.shape[1] == 2:
-        plot_2d_points(X, labels, f"MST clustering ({dataset_name})", mst_edges, cut_edges_set)
-        
+def run(dataset: str, k: int, plot: bool):
+    if dataset == "blobs":
+        A, _ = get_blobs()
+    elif dataset == "wine":
+        A = get_wine()
     else:
-        # PCA to 2D for visualization
-        pca = PCA(n_components=2, random_state=42)
-        X2 = pca.fit_transform(X)
-        plot_2d_points(X2, labels, f"MST clustering ({dataset_name}) - PCA2D (var={pca.explained_variance_ratio_.sum():.2f})", mst_edges, cut_edges_set)
+        raise ValueError("dataset must be 'blobs' or 'wine'")
 
+    D = calculate_distances(A)
 
-# -----------------------------
-# Main
-# -----------------------------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", choices=["blobs", "wine"], required=True)
-    ap.add_argument("--k", type=int, required=True, help="Number of clusters to form by cutting k-1 MST edges")
-    ap.add_argument("--n", type=int, default=40, help="For blobs only: number of points (default 40)")
-    args = ap.parse_args()
-
-    # Load data
-    if args.dataset == "blobs":
-        X, _ = get_blobs(n=args.n)
-    else:
-        X = get_wine()
-
-    # Distances for complete graph
-    D = calculate_distances(X)
-
-    # MST via Kruskal
     mst_builder = KruskalMST()
-    mst_edges, total = mst_builder.build_mst(D)
+    mst_edges, mst_weight = mst_builder.build_mst(D)
 
-    # Cluster by cutting k-1 largest MST edges
-    labels = mst_cut_clustering(mst_edges, n=X.shape[0], k=args.k)
+    print(f"MST total edge weight: {mst_weight:.6f}")
 
-    # Print which edges were cut (useful for report/debug)
-    mst_sorted = sorted(mst_edges, key=lambda e: e.w, reverse=True)
-    cut = mst_sorted[: max(0, args.k - 1)]
-    print(f"MST total weight: {total:.6f}")
-    print(f"Cutting {len(cut)} edges (largest weights):")
-    for e in cut:
-        print(f"  ({e.u}, {e.v}) w={e.w:.6f}")
-    
-    # Calculate objective function: sum of distances of remaining edges
-    cut_set = set(cut)
-    remaining_weight = 0.0
-    for e in mst_edges:
-        if e not in cut_set:
-            # Explicitly look up distance in D as requested
-            dist = D[e.u, e.v]
-            remaining_weight += dist
-            
-            
-    print(f"Total weight of remaining edges (Objective Function): {remaining_weight:.6f}")
+    labels = cut_mst_and_get_labels(mst_edges, A.shape[0], k)
 
-    # -----------------------------
-    # Calculate Cluster Centers and Costs
-    # -----------------------------
-    print("\nCluster Centers and Costs:")
-    total_cluster_cost = 0.0
-    
-    # Get unique labels (clusters), usually 1..k
-    unique_labels = sorted(set(labels))
-    
-    for label in unique_labels:
-        # Indices of points in this cluster
-        indices = np.where(labels == label)[0]
-        
-        if len(indices) == 0:
-            continue
-            
-        # 1. Calculate geometric centroid
-        cluster_points = X[indices]
-        centroid = np.mean(cluster_points, axis=0)
-        
-        # 2. Find the center node (closest to centroid)
-        # Calculate distances from each point in cluster to centroid
-        # We can use np.linalg.norm for Euclidean distance
-        dists_to_centroid = np.linalg.norm(cluster_points - centroid, axis=1)
-        best_local_idx = np.argmin(dists_to_centroid)
-        center_node = indices[best_local_idx]
-        
-        # 3. Calculate Cost: Sum of D[center_node, other_node] for all nodes in cluster
-        # Using the pre-calculated distance matrix D
-        cost = 0.0
-        for idx in indices:
-            cost += D[center_node, idx]
-            
-        total_cluster_cost += cost
-        print(f"  Cluster {label}: Center Node {center_node}, Cost {cost:.6f}")
+    z_mst = medoid_cost_from_labels(D, labels)
+    print(f"MST clustering objective (medoid assignment cost): {z_mst:.6f}")
 
-    print(f"Total Cluster Cost (sum of distances to centers): {total_cluster_cost:.6f}")
+    if plot:
+        if A.shape[1] > 2:
+            X_plot = PCA(n_components=2).fit_transform(A)
+        else:
+            X_plot = A
 
-    # Plot
-    plot_dataset(X, labels, args.dataset, mst_edges, cut)
+        plt.figure(figsize=(6, 5))
+        plt.scatter(X_plot[:, 0], X_plot[:, 1], c=labels, cmap="tab10", s=40)
+        plt.title(f"MST clustering on {dataset}")
+        plt.xlabel("PC1" if A.shape[1] > 2 else "x1")
+        plt.ylabel("PC2" if A.shape[1] > 2 else "x2")
+        plt.tight_layout()
+        plt.show()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", choices=["blobs", "wine"], required=True)
+    parser.add_argument("--k", type=int, required=True)
+    parser.add_argument("--plot", action="store_true")
+    args = parser.parse_args()
+
+    run(args.dataset, args.k, args.plot)
